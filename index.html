@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aether AI</title>
+
+<!-- Google Login -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<style>
+body { margin:0; font-family:Arial; background:#0f172a; color:white; }
+
+.top-bar {
+  display:flex;
+  justify-content:space-between;
+  padding:12px 20px;
+  background:#020617;
+}
+
+.center { text-align:center; margin:20px; }
+
+input {
+  padding:10px;
+  border-radius:8px;
+  border:none;
+  margin:5px;
+}
+
+button {
+  padding:10px 14px;
+  margin:5px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+}
+
+.start { background:#00f0ff; }
+.generate { background:#00f0ff; }
+.workflow { background:#22c55e; color:black; }
+
+.agent {
+  background:rgba(255,255,255,0.05);
+  margin:10px;
+  padding:15px;
+  border-radius:12px;
+}
+
+.output, .history {
+  margin:15px;
+  padding:15px;
+  border-radius:12px;
+}
+
+.output { background:rgba(0,255,255,0.08); }
+.history {
+  background:rgba(255,255,255,0.05);
+  max-height:200px;
+  overflow:auto;
+}
+</style>
+</head>
+
+<body>
+
+<div class="top-bar">
+  <div>☰ Aether AI</div>
+  <div>
+    👤 <span id="userLabel">Not logged in</span> |
+    🌍 Users: <span id="users">120000</span>
+  </div>
+</div>
+
+<div class="center">
+
+  <!-- 手動ログイン -->
+  <input id="username" placeholder="Enter username">
+  <br>
+  <button id="registerBtn">Register</button>
+  <button id="loginBtn">Login</button>
+  <button id="logoutBtn">Logout</button>
+
+  <!-- Googleログイン -->
+  <div id="g_id_onload"
+    data-client_id="YOUR_CLIENT_ID"
+    data-callback="handleCredentialResponse">
+  </div>
+
+  <div class="g_id_signin" data-type="standard"></div>
+
+</div>
+
+<div class="center">
+  <button class="start" id="startBtn">Start AI</button>
+</div>
+
+<div id="agents"></div>
+<div id="output" class="output"></div>
+<div id="history" class="history"></div>
+
+<script>
+const API_URL = "https://your-render-url.onrender.com";
+
+let currentUser = "";
+
+// 🌍 ユーザー数演出
+setInterval(()=>{
+  const el = document.getElementById("users");
+  el.textContent = parseInt(el.textContent) + Math.floor(Math.random()*3);
+},2000);
+
+// 🔥 初期ロード（ログイン保持）
+window.onload = ()=>{
+  const savedUser = localStorage.getItem("user");
+  const googleToken = localStorage.getItem("google_token");
+
+  if(googleToken){
+    handleCredentialResponse({credential: googleToken});
+    return;
+  }
+
+  if(savedUser){
+    currentUser = savedUser;
+    updateUI();
+    loadHistory();
+    loadAgents();
+  }
+};
+
+// UI更新
+function updateUI(){
+  document.getElementById("userLabel").textContent =
+    currentUser ? currentUser : "Not logged in";
+}
+
+// 🔐 Register
+document.getElementById("registerBtn").onclick = async ()=>{
+  const username = document.getElementById("username").value.trim();
+  if(!username) return alert("Enter username");
+
+  const res = await fetch(API_URL+"/register",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({username})
+  });
+
+  const data = await res.json();
+  alert(data.msg);
+};
+
+// 🔐 Login
+document.getElementById("loginBtn").onclick = async ()=>{
+  const username = document.getElementById("username").value.trim();
+  if(!username) return alert("Enter username");
+
+  const res = await fetch(API_URL+"/login",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({username})
+  });
+
+  const data = await res.json();
+
+  if(data.msg === "Login success"){
+    currentUser = username;
+    localStorage.setItem("user", username);
+    updateUI();
+    loadHistory();
+    loadAgents();
+    alert("Logged in");
+  } else {
+    alert("User not found");
+  }
+};
+
+// 🔐 Logout
+document.getElementById("logoutBtn").onclick = ()=>{
+  currentUser = "";
+  localStorage.removeItem("user");
+  localStorage.removeItem("google_token");
+
+  updateUI();
+  document.getElementById("agents").innerHTML = "";
+  document.getElementById("history").innerHTML = "";
+  document.getElementById("output").innerHTML = "";
+};
+
+// 🔥 Googleログイン本体
+function handleCredentialResponse(response){
+
+  const token = response.credential;
+
+  fetch(API_URL + "/google-login",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({token})
+  })
+  .then(res=>res.json())
+  .then(data=>{
+
+    if(data.username){
+      currentUser = data.username;
+
+      localStorage.setItem("user", currentUser);
+      localStorage.setItem("google_token", token);
+
+      updateUI();
+      loadHistory();
+      loadAgents();
+
+      alert("Google login success");
+    }
+  });
+}
+
+// 📜 History
+async function loadHistory(){
+  if(!currentUser) return;
+
+  const res = await fetch(API_URL+"/history",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({username:currentUser})
+  });
+
+  const data = await res.json();
+
+  const el = document.getElementById("history");
+
+  if(!data.history || data.history.length === 0){
+    el.innerHTML = "<h3>History</h3><p>No data</p>";
+    return;
+  }
+
+  el.innerHTML = "<h3>History</h3>" +
+    data.history.map(h=>`
+      <p><b>${h.agent}</b>: ${h.result}</p>
+    `).join("");
+}
+
+// 🤖 Agents
+const agents = [
+  { name: "Video Generator AI" },
+  { name: "Content Writer AI" },
+  { name: "Idea Creator AI" }
+];
+
+// Start
+document.getElementById("startBtn").onclick = ()=>{
+  if(!currentUser) return alert("Login first");
+  loadAgents();
+};
+
+// Agents表示
+function loadAgents(){
+  const container = document.getElementById("agents");
+  container.innerHTML = "";
+
+  agents.forEach(agent=>{
+    const div = document.createElement("div");
+    div.className = "agent";
+
+    const genBtn = document.createElement("button");
+    genBtn.textContent = "Generate";
+    genBtn.className = "generate";
+
+    const wfBtn = document.createElement("button");
+    wfBtn.textContent = "Workflow";
+    wfBtn.className = "workflow";
+
+    div.innerHTML = `<h3>${agent.name}</h3>`;
+    div.appendChild(genBtn);
+    div.appendChild(wfBtn);
+
+    // Generate
+    genBtn.onclick = async ()=>{
+      document.getElementById("output").innerHTML = "Generating...";
+
+      try{
+        const res = await fetch(API_URL+"/generate",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({
+            username: currentUser,
+            agent: agent.name
+          })
+        });
+
+        const data = await res.json();
+
+        document.getElementById("output").innerHTML =
+          `<h3>${agent.name}</h3><p>${data.result}</p>`;
+
+        loadHistory();
+
+      }catch{
+        document.getElementById("output").innerHTML = "Server error";
+      }
+    };
+
+    // Workflow
+    wfBtn.onclick = async ()=>{
+      document.getElementById("output").innerHTML = "Running workflow...";
+
+      const steps = ["Idea","Script","Title","Improve"];
+      let html = "";
+
+      for(let step of steps){
+        try{
+          const res = await fetch(API_URL+"/generate",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({
+              username: currentUser,
+              agent: agent.name
+            })
+          });
+
+          const data = await res.json();
+          html += `<h4>${step}</h4><p>${data.result}</p>`;
+        }catch{
+          html += `<p>Error at ${step}</p>`;
+        }
+      }
+
+      document.getElementById("output").innerHTML = html;
+      loadHistory();
+    };
+
+    container.appendChild(div);
+  });
+}
+</script>
+
+</body>
+  </html>
